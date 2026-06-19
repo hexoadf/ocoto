@@ -108,9 +108,15 @@ async function createUser(email, res) {
 // API ROUTES
 // ============================================
 
+// Root health check
+app.get('/', (req, res) => {
+    res.json({ message: 'Hexa Chat API Server', status: 'running' });
+});
+
 // 1. Signup
 app.post('/api/signup', async (req, res) => {
     try {
+
         const { name, email, phone, password } = req.body;
         if (!name || !email || !phone || !password) {
             return res.status(400).json({ error: 'All fields required' });
