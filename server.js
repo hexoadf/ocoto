@@ -12,31 +12,46 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
 // ============================================
+// CORS - PRODUCTION READY
+// ============================================
+app.use(cors({
+    origin: [
+        'https://dancing-wisp-b709bf.netlify.app',
+        'https://ocoto-production.up.railway.app'
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
+
+// ============================================
 // Socket.IO Setup
 // ============================================
 const io = socketIo(server, {
     cors: {
-        origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5500', '*'],
-        credentials: true
+        origin: [
+            'http://localhost:3000',
+            'http://127.0.0.1:3000',
+            'http://localhost:5500',
+            'http://127.0.0.1:5500',
+            'https://dancing-wisp-b709bf.netlify.app',
+            'https://ocoto-production.up.railway.app',
+            '*'
+        ],
+        credentials: true,
+        methods: ['GET', 'POST']
     },
     transports: ['websocket', 'polling']
 });
 
 // ============================================
-// Middleware
-// ============================================
-app.use(cors({
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5500', '*'],
-    credentials: true
-}));
-app.use(express.json());
-
-// ============================================
 // Supabase Setup
 // ============================================
 const supabase = createClient(
-    'https://tyhcvjyhlgpernuvcxuq.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5aGN2anlobGdwZXJudXZjeHVxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTcxNzMxMiwiZXhwIjoyMDk3MjkzMzEyfQ.zKwrvIqANgTkGKyKZsjUvRYKeZlS_bSbUxePW-bPtnc'
+    process.env.SUPABASE_URL || 'https://tyhcvjyhlgpernuvcxuq.supabase.co',
+    process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5aGN2anlobGdwZXJudXZjeHVxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTcxNzMxMiwiZXhwIjoyMDk3MjkzMzEyfQ.zKwrvIqANgTkGKyKZsjUvRYKeZlS_bSbUxePW-bPtnc'
 );
 
 // ============================================
@@ -81,7 +96,7 @@ async function createUser(email, res) {
 
         const token = jwt.sign(
             { userId: newUser.id, email: newUser.email },
-            'hexa_chat_secret_key_2026',
+            process.env.JWT_SECRET || 'hexa_chat_secret_key_2026',
             { expiresIn: '7d' }
         );
 
@@ -105,19 +120,35 @@ async function createUser(email, res) {
 }
 
 // ============================================
+// ROOT ROUTE
+// ============================================
+app.get('/', (req, res) => {
+    res.json({
+        message: 'Hexa Chat API Server',
+        status: 'running',
+        endpoints: [
+            '/api/signup',
+            '/api/login',
+            '/api/verify-otp',
+            '/api/users',
+            '/api/user/:id',
+            '/api/messages/:user1/:user2',
+            '/api/contacts/:userId',
+            '/api/test'
+        ]
+    });
+});
+
+// ============================================
 // API ROUTES
 // ============================================
-
-// Root health check
-app.get('/', (req, res) => {
-    res.json({ message: 'Hexa Chat API Server', status: 'running' });
-});
 
 // 1. Signup
 app.post('/api/signup', async (req, res) => {
     try {
-
         const { name, email, phone, password } = req.body;
+        console.log('📝 Signup for:', email);
+
         if (!name || !email || !phone || !password) {
             return res.status(400).json({ error: 'All fields required' });
         }
@@ -135,6 +166,8 @@ app.post('/api/signup', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const otp = generateOTP();
 
+        console.log('🔑 Generated OTP:', otp, 'for:', email);
+
         tempUserStore.set(email, {
             name, email, phone,
             password: hashedPassword,
@@ -143,10 +176,10 @@ app.post('/api/signup', async (req, res) => {
         });
 
         res.json({
-            message: 'OTP generated. Use debug OTP.',
+            message: 'OTP generated successfully',
             email,
-            otpSent: false,
-            debug_otp: otp
+            debug_otp: otp,
+            otpSent: false
         });
 
     } catch (error) {
@@ -159,16 +192,23 @@ app.post('/api/signup', async (req, res) => {
 app.post('/api/verify-otp', async (req, res) => {
     try {
         const { email, otp } = req.body;
+        console.log('🔐 Verifying OTP for:', email, 'OTP:', otp);
+
         const userData = tempUserStore.get(email);
 
         if (!userData) {
             return res.status(400).json({ error: 'No signup request found' });
         }
 
+        console.log('📦 Stored OTP:', userData.otp);
+        console.log('📝 Entered OTP:', otp);
+
         if (userData.otp === otp) {
+            console.log('✅ OTP matched!');
             return await createUser(email, res);
         }
 
+        console.log('❌ OTP mismatch!');
         return res.status(400).json({ error: 'Invalid OTP' });
 
     } catch (error) {
@@ -181,7 +221,7 @@ app.post('/api/verify-otp', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        console.log(`🔑 Login attempt: ${email}`);
+        console.log('🔑 Login attempt:', email);
 
         const { data: user, error } = await supabase
             .from('users')
@@ -200,7 +240,7 @@ app.post('/api/login', async (req, res) => {
 
         const token = jwt.sign(
             { userId: user.id, email: user.email },
-            'hexa_chat_secret_key_2026',
+            process.env.JWT_SECRET || 'hexa_chat_secret_key_2026',
             { expiresIn: '7d' }
         );
 
@@ -345,6 +385,7 @@ app.post('/api/contacts', async (req, res) => {
     try {
         const { user_id, contact_id, contact_name } = req.body;
 
+        // Check if contact already exists
         const { data: existing } = await supabase
             .from('contacts')
             .select('*')
@@ -390,10 +431,16 @@ app.post('/api/contacts', async (req, res) => {
     }
 });
 
-// 10. Get user contacts
+// 10. Get user contacts - FIXED
 app.get('/api/contacts/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
+        
+        console.log('📇 Getting contacts for userId:', userId);
+
+        if (!userId) {
+            return res.status(400).json({ error: 'User ID is required' });
+        }
 
         const { data: contacts, error } = await supabase
             .from('contacts')
@@ -411,9 +458,10 @@ app.get('/api/contacts/:userId', async (req, res) => {
 
         if (error) {
             console.error('Supabase error:', error);
-            return res.status(500).json({ error: 'Failed to get contacts' });
+            return res.status(500).json({ error: 'Failed to get contacts: ' + error.message });
         }
 
+        console.log('✅ Found contacts:', contacts?.length || 0);
         res.json({ contacts: contacts || [] });
 
     } catch (error) {
@@ -430,29 +478,42 @@ app.get('/api/test', (req, res) => {
     });
 });
 
+// 12. 404 handler
+app.use((req, res) => {
+    res.status(404).json({ 
+        error: 'Route not found',
+        path: req.path,
+        availableEndpoints: [
+            '/',
+            '/api/signup',
+            '/api/login',
+            '/api/verify-otp',
+            '/api/users',
+            '/api/user/:id',
+            '/api/messages/:user1/:user2',
+            '/api/contacts/:userId',
+            '/api/test'
+        ]
+    });
+});
+
 // ============================================
-// SOCKET.IO - COMPLETE FIXED
+// SOCKET.IO
 // ============================================
 io.on('connection', (socket) => {
     console.log('🔌 New client connected:', socket.id);
 
-    // User online
     socket.on('user-online', (userId) => {
         onlineUsers.set(userId, socket.id);
         io.emit('online-users', Array.from(onlineUsers.keys()));
         console.log(`👤 User ${userId} is online (${onlineUsers.size} users online)`);
     });
 
-    // ============================================
-    // SEND MESSAGE - FIXED
-    // ============================================
     socket.on('send-message', async (data) => {
         try {
             const { sender_id, receiver_id, message } = data;
             console.log(`📤 [SOCKET] Message from ${sender_id} to ${receiver_id}: "${message}"`);
-            console.log(`📤 [SOCKET] Data received:`, JSON.stringify(data));
 
-            // Save to database
             const { data: newMessage, error } = await supabase
                 .from('messages')
                 .insert([
@@ -474,11 +535,9 @@ io.on('connection', (socket) => {
 
             console.log('✅ [SOCKET] Message saved:', newMessage.id);
 
-            // Send to sender (confirmation)
             socket.emit('message-sent', newMessage);
             console.log(`📨 [SOCKET] Sent to sender: ${sender_id}`);
 
-            // Send to receiver if online
             const receiverSocketId = onlineUsers.get(receiver_id);
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit('new-message', newMessage);
@@ -493,7 +552,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Typing indicator
     socket.on('typing', (data) => {
         const { sender_id, receiver_id, isTyping } = data;
         const receiverSocketId = onlineUsers.get(receiver_id);
@@ -502,7 +560,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Disconnect
     socket.on('disconnect', () => {
         let disconnectedUser = null;
         for (let [userId, socketId] of onlineUsers.entries()) {
@@ -525,12 +582,13 @@ io.on('connection', (socket) => {
 // ============================================
 // Start Server
 // ============================================
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log('\n═══════════════════════════════════════════');
     console.log('🚀 Hexa Chat Server Started Successfully!');
     console.log('═══════════════════════════════════════════');
     console.log(`📡 HTTP: http://localhost:${PORT}`);
     console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
     console.log(`🗄️  Database: Supabase`);
+    console.log(`🌐 CORS: Production Ready`);
     console.log('═══════════════════════════════════════════\n');
 });
